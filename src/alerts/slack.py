@@ -4,7 +4,7 @@ import logging
 
 import requests
 
-from src.alerts.base import AlertChannel, format_alert
+from src.alerts.base import AlertChannel, slack_payload
 from src.models import TeeTime
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class SlackWebhookAlert(AlertChannel):
     def send(self, tee_time: TeeTime) -> None:
         response = requests.post(
             self.webhook_url,
-            json={"text": format_alert(tee_time)},
+            json=slack_payload(tee_time),
             timeout=self.timeout_seconds,
         )
         response.raise_for_status()
@@ -30,4 +30,3 @@ class SlackWebhookAlert(AlertChannel):
             tee_time.date_iso,
             tee_time.time_hhmm,
         )
-

@@ -66,6 +66,13 @@ MAX_DAYS_AHEAD=7
 DRY_RUN=true
 DATABASE_PATH=torrey_tee_times.db
 BOOKING_URL=https://www.sandiego.gov/torrey-pines
+RELEASE_WATCH_DURATION_SECONDS=420
+RELEASE_WATCH_INTERVAL_SECONDS=15
+RELEASE_WATCH_JITTER_SECONDS=2
+RELEASE_WATCH_MAX_RUNS=
+PRIORITY_SOUTH_18_BEFORE=15:30
+PRIORITY_SOUTH_ANY_BEFORE=16:30
+PRIORITY_NORTH_18_BEFORE=16:30
 ```
 
 `TARGET_DATES` is optional. If omitted, the monitor checks each date from today through `MAX_DAYS_AHEAD`. To pin specific dates, use:
@@ -132,13 +139,17 @@ Alert format:
 
 ```text
 Torrey Pines tee time open:
+Priority: Top priority: South 18 before 3:30 PM
 Course: South
 Date: 2026-06-20
-Time: 07:24
+Time: 07:24 PT
 Players: 2
+Holes: 18
 Price: $85
 Book manually: https://www.sandiego.gov/torrey-pines
 ```
+
+Slack alerts use Block Kit with fallback text and a `Book manually` button. The button only opens the ForeUp booking page; it does not submit forms, hold tee times, create reservations, or call reservation endpoints.
 
 ## Run Locally
 
@@ -205,6 +216,26 @@ Run continuously without sending alerts:
 python -m src.main run --dry-run
 ```
 
+Run a short release-window watcher:
+
+```powershell
+python -m src.main release-watch
+```
+
+`release-watch` loops internally for a few minutes and exits. It uses the same read-only ForeUp availability endpoint, same filtering, same Firestore or SQLite dedupe, and the same dry-run rules as `check-once`.
+
+## Priority Ranking
+
+Matched tee times are scored and sorted before dry-run output or Slack alerts:
+
+1. South, 18 holes, at or before `PRIORITY_SOUTH_18_BEFORE` default `15:30`.
+2. South, any holes, at or before `PRIORITY_SOUTH_ANY_BEFORE` default `16:30`.
+3. North, 18 holes, at or before `PRIORITY_NORTH_18_BEFORE` default `16:30`.
+4. Any configured match at or before `LATEST_TIME`.
+5. Later configured matches rank lower if `LATEST_TIME` is extended.
+
+Priority labels are included in Slack alerts and dry-run output. Scoring does not affect tee-time identity or dedupe keys.
+
 ## Polling Cadence
 
 The scheduler supports two watch modes:
@@ -226,6 +257,17 @@ RELEASE_WINDOW_END=19:05
 Keep request volume low. Use the release cadence only during a narrow expected release window, and prefer the normal cancellation cadence for all other monitoring. Do not reduce polling intervals unless you are certain the request volume remains respectful.
 
 The run loop is sequential and does not create parallel ForeUp request bursts. It backs off on network errors, `401`, `403`, `429`, and server errors, and slows the next poll after a new match is found.
+
+Release-watch defaults:
+
+```dotenv
+RELEASE_WATCH_DURATION_SECONDS=420
+RELEASE_WATCH_INTERVAL_SECONDS=15
+RELEASE_WATCH_JITTER_SECONDS=2
+RELEASE_WATCH_MAX_RUNS=
+```
+
+Transient network and non-auth HTTP errors are logged with redacted messages and the loop continues. `401` or `403` auth/session failures stop the command with a non-zero exit code.
 
 ## Windows Task Scheduler
 
@@ -296,11 +338,20 @@ gcloud builds submit \
 Cloud Run Job notes:
 
 - Image: `us-west1-docker.pkg.dev/lazydog-analytics/torrey-pines/torrey-monitor:latest`
-- Command: `python`
-- Args: `-m src.main check-once`
+- Normal monitor command: `python`
+- Normal monitor args: `-m src.main check-once`
+- Release-window command: `python`
+- Release-window args: `-m src.main release-watch`
 - Configure secrets and environment variables in Cloud Run, not in the repo or image.
 - Keep `SLACK_WEBHOOK_URL`, `FOREUP_BEARER_TOKEN`, and `FOREUP_COOKIE` external through Cloud Run environment variables or Google Secret Manager.
 - Do not commit `.env`, local databases, logs, or browser session values.
+
+Suggested Cloud Scheduler jobs:
+
+- Normal monitor, every 10 minutes: `*/10 * * * *`
+- Release watch, once daily around 6:58 PM Pacific: `58 18 * * *`
+
+Use the same container image for both Cloud Run Jobs and change only the command args. Keep `STATE_BACKEND=firestore` for Cloud Run Jobs so dedupe survives between executions.
 
 ## Tests
 

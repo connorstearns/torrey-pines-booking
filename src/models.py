@@ -17,6 +17,8 @@ class TeeTime:
     booking_url: str | None = None
     source_id: str | None = None
     metadata: dict[str, Any] | None = None
+    priority_score: int = 0
+    priority_label: str = "Standard"
 
     @property
     def date_iso(self) -> str:
@@ -51,4 +53,6 @@ class TeeTime:
             "booking_url": self.booking_url,
             "source_id": self.source_id,
             "metadata": self.metadata or {},
+            "priority_score": self.priority_score,
+            "priority_label": self.priority_label,
         }

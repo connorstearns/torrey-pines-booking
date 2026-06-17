@@ -13,7 +13,12 @@ from .db import SeenTeeTimeStore
 from .fetchers.base import TeeTimeFetcher
 from .filters import filter_tee_times
 from .models import TeeTime
+from .priorities import score_and_sort_tee_times
 from .session_health import SESSION_EXPIRED_MESSAGE, send_session_alert_once
+
+
+class AuthSessionFailure(RuntimeError):
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +56,7 @@ def check_once(
     dry_run: bool,
 ) -> list[TeeTime]:
     fetched = fetcher.fetch(config.target_dates)
-    matching = filter_tee_times(fetched, config)
+    matching = score_and_sort_tee_times(filter_tee_times(fetched, config), config)
     new_matches = [tee_time for tee_time in matching if not store.has_seen(tee_time)]
 
     logger.info(
@@ -77,6 +82,52 @@ def check_once(
         logger.info("Dry run enabled; not sending alerts or marking slots as seen")
 
     return new_matches
+
+
+def release_watch(
+    config: WatchConfig,
+    fetcher: TeeTimeFetcher,
+    store: SeenTeeTimeStore,
+    alert_channel: AlertChannel | None,
+    dry_run: bool,
+    monotonic_func=time_module.monotonic,
+    sleep_func=time_module.sleep,
+    jitter_func=random.uniform,
+) -> int:
+    started_at = monotonic_func()
+    runs = 0
+    logger.info(
+        "Starting release-watch for %s seconds; dry_run=%s",
+        config.release_watch_duration_seconds,
+        dry_run,
+    )
+
+    while monotonic_func() - started_at < config.release_watch_duration_seconds:
+        if config.release_watch_max_runs is not None and runs >= config.release_watch_max_runs:
+            logger.info("Release-watch reached max run cap")
+            break
+        runs += 1
+        try:
+            check_once(config, fetcher, store, alert_channel, dry_run)
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code in {401, 403}:
+                raise AuthSessionFailure(
+                    "ForeUp auth/session failed during release-watch. Run auth-check; no secrets were printed."
+                ) from exc
+            logger.warning("Release-watch transient HTTP error; status=%s", status_code)
+        except requests.RequestException as exc:
+            logger.warning("Release-watch transient network error: %s", type(exc).__name__)
+
+        if monotonic_func() - started_at >= config.release_watch_duration_seconds:
+            break
+        sleep_seconds = config.release_watch_interval_seconds
+        if config.release_watch_jitter_seconds > 0:
+            sleep_seconds += jitter_func(0, config.release_watch_jitter_seconds)
+        remaining_seconds = config.release_watch_duration_seconds - (monotonic_func() - started_at)
+        sleep_func(min(sleep_seconds, max(0, remaining_seconds)))
+
+    return runs
 
 
 def run_forever(

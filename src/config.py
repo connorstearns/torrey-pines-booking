@@ -79,6 +79,13 @@ class WatchConfig:
     release_poll_max_seconds: int
     release_window_start: time
     release_window_end: time
+    release_watch_duration_seconds: int
+    release_watch_interval_seconds: int
+    release_watch_jitter_seconds: int
+    release_watch_max_runs: int | None
+    priority_south_18_before: time
+    priority_south_any_before: time
+    priority_north_18_before: time
     log_level: str
     foreup_base_url: str
     foreup_timeout_seconds: int
@@ -98,6 +105,7 @@ def load_config() -> WatchConfig:
     normal_max = _get_int("NORMAL_POLL_MAX_SECONDS", 900)
     release_min = _get_int("RELEASE_POLL_MIN_SECONDS", 10)
     release_max = _get_int("RELEASE_POLL_MAX_SECONDS", 20)
+    release_watch_max_runs_raw = os.getenv("RELEASE_WATCH_MAX_RUNS")
 
     if normal_min > normal_max:
         raise ValueError("NORMAL_POLL_MIN_SECONDS must be <= NORMAL_POLL_MAX_SECONDS")
@@ -125,6 +133,17 @@ def load_config() -> WatchConfig:
         release_poll_max_seconds=release_max,
         release_window_start=_get_time("RELEASE_WINDOW_START", "18:58"),
         release_window_end=_get_time("RELEASE_WINDOW_END", "19:05"),
+        release_watch_duration_seconds=_get_int("RELEASE_WATCH_DURATION_SECONDS", 420),
+        release_watch_interval_seconds=_get_int("RELEASE_WATCH_INTERVAL_SECONDS", 15),
+        release_watch_jitter_seconds=_get_int("RELEASE_WATCH_JITTER_SECONDS", 2),
+        release_watch_max_runs=(
+            int(release_watch_max_runs_raw)
+            if release_watch_max_runs_raw and release_watch_max_runs_raw.strip()
+            else None
+        ),
+        priority_south_18_before=_get_time("PRIORITY_SOUTH_18_BEFORE", "15:30"),
+        priority_south_any_before=_get_time("PRIORITY_SOUTH_ANY_BEFORE", "16:30"),
+        priority_north_18_before=_get_time("PRIORITY_NORTH_18_BEFORE", "16:30"),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         foreup_base_url=os.getenv("FOREUP_BASE_URL", "https://foreupsoftware.com").rstrip("/"),
         foreup_timeout_seconds=_get_int("FOREUP_TIMEOUT_SECONDS", 10),

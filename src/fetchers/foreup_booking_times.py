@@ -43,6 +43,10 @@ class BlocklistedForeUpUrlError(ValueError):
     pass
 
 
+class AuthConfigurationError(ValueError):
+    pass
+
+
 class ForeUpBookingTimesFetcher(TeeTimeFetcher):
     def __init__(
         self,
@@ -57,8 +61,8 @@ class ForeUpBookingTimesFetcher(TeeTimeFetcher):
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.use_auth = use_auth
-        self.bearer_token = bearer_token
-        self.cookie = cookie
+        self.bearer_token = _sanitize_bearer_token(bearer_token) if use_auth and bearer_token else bearer_token
+        self.cookie = _sanitize_cookie(cookie) if use_auth and cookie else cookie
         self.watch_courses = {course.lower() for course in watch_courses or {"north", "south"}}
         self.session = session or requests.Session()
 
@@ -101,6 +105,11 @@ class ForeUpBookingTimesFetcher(TeeTimeFetcher):
         if not self.use_auth:
             return headers
 
+        if not self.bearer_token or not self.cookie:
+            raise AuthConfigurationError(
+                "FOREUP_USE_AUTH=true requires FOREUP_BEARER_TOKEN and FOREUP_COOKIE. "
+                "Values were not printed."
+            )
         if self.bearer_token:
             headers["Authorization"] = f"Bearer {self.bearer_token}"
         if self.cookie:
@@ -251,3 +260,30 @@ def _price_for_holes(item: dict[str, Any], holes: int | None) -> Any:
     if holes == 18 and item.get("green_fee_18") is not None:
         return item.get("green_fee_18")
     return item.get("green_fee_9") or item.get("green_fee_18")
+
+
+def _reject_header_newlines(value: str, env_name: str) -> None:
+    if "\r" in value or "\n" in value:
+        raise AuthConfigurationError(f"{env_name} contains invalid newline characters. Value was not printed.")
+
+
+def _sanitize_bearer_token(value: str) -> str:
+    cleaned = value.strip()
+    _reject_header_newlines(cleaned, "FOREUP_BEARER_TOKEN")
+    if cleaned.lower().startswith("bearer "):
+        cleaned = cleaned[7:].strip()
+        _reject_header_newlines(cleaned, "FOREUP_BEARER_TOKEN")
+    if not cleaned:
+        raise AuthConfigurationError("FOREUP_BEARER_TOKEN is empty after sanitization. Value was not printed.")
+    return cleaned
+
+
+def _sanitize_cookie(value: str) -> str:
+    cleaned = value.strip()
+    _reject_header_newlines(cleaned, "FOREUP_COOKIE")
+    if cleaned.lower().startswith("cookie:"):
+        cleaned = cleaned.split(":", 1)[1].strip()
+        _reject_header_newlines(cleaned, "FOREUP_COOKIE")
+    if not cleaned:
+        raise AuthConfigurationError("FOREUP_COOKIE is empty after sanitization. Value was not printed.")
+    return cleaned

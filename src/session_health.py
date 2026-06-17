@@ -90,6 +90,23 @@ def decode_jwt_expiration(
     )
 
 
+def auth_config_warnings(config: WatchConfig) -> list[str]:
+    warnings: list[str] = []
+    if config.foreup_use_auth and (not config.foreup_bearer_token or not config.foreup_cookie):
+        warnings.append("FOREUP_USE_AUTH=true requires FOREUP_BEARER_TOKEN and FOREUP_COOKIE.")
+    token_status = decode_jwt_expiration(
+        config.foreup_bearer_token,
+        config.token_expiry_warning_hours,
+    )
+    if token_status.is_expired:
+        warnings.append("Bearer token is expired.")
+    elif token_status.expires_soon:
+        warnings.append("Bearer token expires soon.")
+    elif token_status.is_malformed:
+        warnings.append("Bearer token expiration could not be decoded.")
+    return warnings
+
+
 def send_slack_text(
     webhook_url: str | None,
     text: str,
