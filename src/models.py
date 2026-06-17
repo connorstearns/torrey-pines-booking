@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, time
+from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class TeeTime:
+    date: date
+    time: time
+    course: str
+    players_available: int
+    price: str | float | int | None = None
+    booking_url: str | None = None
+    source_id: str | None = None
+
+    @property
+    def date_iso(self) -> str:
+        return self.date.isoformat()
+
+    @property
+    def time_hhmm(self) -> str:
+        return self.time.strftime("%H:%M")
+
+    @property
+    def dedupe_key(self) -> str:
+        source_part = self.source_id or ""
+        return "|".join(
+            [
+                self.date_iso,
+                self.time_hhmm,
+                self.course.strip().lower(),
+                str(self.players_available),
+                source_part,
+            ]
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "date": self.date_iso,
+            "time": self.time_hhmm,
+            "course": self.course,
+            "players_available": self.players_available,
+            "price": self.price,
+            "booking_url": self.booking_url,
+            "source_id": self.source_id,
+        }
+
