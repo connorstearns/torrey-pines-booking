@@ -7,6 +7,7 @@ from datetime import datetime, time
 
 import requests
 
+from .alerts.batch import format_batch_alert, included_batch_slots
 from .alerts.base import AlertChannel, format_alert
 from .config import WatchConfig
 from .db import SeenTeeTimeStore
@@ -65,6 +66,22 @@ def check_once(
         len(matching),
         len(new_matches),
     )
+
+    if config.slack_alert_mode == "batch":
+        included, overflow_count = included_batch_slots(new_matches, config)
+        if not included:
+            return new_matches
+        if dry_run:
+            print(format_batch_alert(included, config, dry_run=True, overflow_count=overflow_count))
+            print()
+            logger.info("Dry run enabled; not sending batch alert or marking slots as seen")
+            return new_matches
+        if alert_channel is None:
+            raise RuntimeError("No alert channel configured")
+        alert_channel.send_batch(included, config)
+        if config.slack_batch_mark_seen_after_send:
+            store.mark_seen_many(included)
+        return new_matches
 
     for tee_time in new_matches:
         if dry_run:

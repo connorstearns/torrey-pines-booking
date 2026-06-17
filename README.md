@@ -47,6 +47,11 @@ Key `.env` values:
 ```dotenv
 SLACK_WEBHOOK_URL=
 ALERT_CHANNEL=slack
+SLACK_ALERT_MODE=single
+SLACK_BATCH_GROUP_BY=hour
+SLACK_BATCH_MAX_SLOTS=20
+SLACK_BATCH_INCLUDE_STANDARD_MATCHES=true
+SLACK_BATCH_MARK_SEEN_AFTER_SEND=true
 STATE_BACKEND=sqlite
 FOREUP_USE_AUTH=false
 FOREUP_BEARER_TOKEN=
@@ -150,6 +155,26 @@ Book manually: https://www.sandiego.gov/torrey-pines
 ```
 
 Slack alerts use Block Kit with fallback text and a `Book manually` button. The button only opens the ForeUp booking page; it does not submit forms, hold tee times, create reservations, or call reservation endpoints.
+
+## Slack Alert Modes
+
+Default behavior sends one Slack message per new tee time:
+
+```dotenv
+SLACK_ALERT_MODE=single
+```
+
+Batch mode reduces Slack noise by sending one grouped message per run:
+
+```dotenv
+SLACK_ALERT_MODE=batch
+SLACK_BATCH_GROUP_BY=hour
+SLACK_BATCH_MAX_SLOTS=20
+SLACK_BATCH_INCLUDE_STANDARD_MATCHES=true
+SLACK_BATCH_MARK_SEEN_AFTER_SEND=true
+```
+
+Batch alerts are grouped by date when needed, then by hour of day. Each listed tee time includes priority label, course, friendly time, players available, holes, side when present, price when present, and a manual `Book manually` ForeUp link. Overflow slots are not marked seen unless they are included in the sent batch message.
 
 ## Run Locally
 

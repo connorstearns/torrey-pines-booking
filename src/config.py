@@ -62,6 +62,11 @@ class WatchConfig:
     state_backend: str
     slack_webhook_url: str | None
     alert_channel: str
+    slack_alert_mode: str
+    slack_batch_group_by: str
+    slack_batch_max_slots: int
+    slack_batch_include_standard_matches: bool
+    slack_batch_mark_seen_after_send: bool
     timezone: ZoneInfo
     watch_courses: set[str]
     watch_holes: set[int]
@@ -116,6 +121,11 @@ def load_config() -> WatchConfig:
         state_backend=os.getenv("STATE_BACKEND", "sqlite").strip().lower(),
         slack_webhook_url=os.getenv("SLACK_WEBHOOK_URL") or None,
         alert_channel=os.getenv("ALERT_CHANNEL", "slack").strip().lower(),
+        slack_alert_mode=os.getenv("SLACK_ALERT_MODE", "single").strip().lower(),
+        slack_batch_group_by=os.getenv("SLACK_BATCH_GROUP_BY", "hour").strip().lower(),
+        slack_batch_max_slots=_get_int("SLACK_BATCH_MAX_SLOTS", 20),
+        slack_batch_include_standard_matches=_get_bool("SLACK_BATCH_INCLUDE_STANDARD_MATCHES", True),
+        slack_batch_mark_seen_after_send=_get_bool("SLACK_BATCH_MARK_SEEN_AFTER_SEND", True),
         timezone=timezone,
         watch_courses={course.lower() for course in _get_csv("WATCH_COURSES", "North,South")},
         watch_holes=_get_int_csv("WATCH_HOLES", "9,18"),

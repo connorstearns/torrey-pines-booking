@@ -10,6 +10,10 @@ class AlertChannel(ABC):
     def send(self, tee_time: TeeTime) -> None:
         """Send an alert for one tee time."""
 
+    def send_batch(self, tee_times: list[TeeTime], config) -> None:
+        """Send one alert containing multiple tee times."""
+        raise NotImplementedError("This alert channel does not support batch sends")
+
 
 def format_alert(tee_time: TeeTime) -> str:
     price = tee_time.price if tee_time.price is not None else "Unknown"
