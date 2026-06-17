@@ -274,11 +274,33 @@ Seen-slot documents store only alert state such as `source_id`, `course`, `date`
 Cloud setup outline:
 
 1. Enable Firestore in the Google Cloud project.
-2. Deploy the container with dependencies from `requirements.txt`.
-3. Run the Cloud Run Job service account with Firestore read/write access for the two collections above.
-4. Set `STATE_BACKEND=firestore` in the Cloud Run Job environment.
-5. Store Slack and ForeUp secrets only in a proper secret manager or local `.env` for local runs, never in source code or Firestore.
-6. Keep the same conservative schedule and read-only endpoint restrictions used locally.
+2. Create or use the Artifact Registry Docker repository.
+3. Build and push the container image with Cloud Build.
+4. Run the Cloud Run Job service account with Firestore read/write access for the two collections above.
+5. Set `STATE_BACKEND=firestore` in the Cloud Run Job environment.
+6. Store Slack and ForeUp secrets only in a proper secret manager or local `.env` for local runs, never in source code or Firestore.
+7. Keep the same conservative schedule and read-only endpoint restrictions used locally.
+
+Cloud Build image command:
+
+```bash
+PROJECT_ID="lazydog-analytics"
+REGION="us-west1"
+REPO="torrey-pines"
+IMAGE="torrey-monitor"
+
+gcloud builds submit \
+  --tag "$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:latest"
+```
+
+Cloud Run Job notes:
+
+- Image: `us-west1-docker.pkg.dev/lazydog-analytics/torrey-pines/torrey-monitor:latest`
+- Command: `python`
+- Args: `-m src.main check-once`
+- Configure secrets and environment variables in Cloud Run, not in the repo or image.
+- Keep `SLACK_WEBHOOK_URL`, `FOREUP_BEARER_TOKEN`, and `FOREUP_COOKIE` external through Cloud Run environment variables or Google Secret Manager.
+- Do not commit `.env`, local databases, logs, or browser session values.
 
 ## Tests
 
