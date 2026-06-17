@@ -5,6 +5,8 @@ import random
 import time as time_module
 from datetime import datetime, time
 
+import requests
+
 from .alerts.base import AlertChannel, format_alert
 from .config import WatchConfig
 from .db import SeenTeeTimeStore
@@ -26,6 +28,18 @@ def _next_interval_seconds(config: WatchConfig) -> int:
     if _time_in_window(now, config.release_window_start, config.release_window_end):
         return random.randint(config.release_poll_min_seconds, config.release_poll_max_seconds)
     return random.randint(config.normal_poll_min_seconds, config.normal_poll_max_seconds)
+
+
+def _backoff_seconds(config: WatchConfig, current_backoff_seconds: int, error: Exception) -> int:
+    base = max(current_backoff_seconds * 2, config.normal_poll_min_seconds)
+    capped = min(base, config.normal_poll_max_seconds * 2)
+    if isinstance(error, requests.HTTPError) and error.response is not None:
+        status_code = error.response.status_code
+        if status_code in {401, 403, 429} or 500 <= status_code <= 599:
+            return capped
+    if isinstance(error, requests.RequestException):
+        return capped
+    return min(max(current_backoff_seconds * 2, 30), 300)
 
 
 def check_once(
@@ -76,17 +90,19 @@ def run_forever(
 
     while True:
         try:
-            check_once(config, fetcher, store, alert_channel, dry_run)
+            new_matches = check_once(config, fetcher, store, alert_channel, dry_run)
             backoff_seconds = 0
             sleep_seconds = _next_interval_seconds(config)
+            if new_matches:
+                sleep_seconds = max(sleep_seconds, config.normal_poll_max_seconds)
+                logger.info("New match found; slowing next poll to at least normal max interval")
         except KeyboardInterrupt:
             logger.info("Stopping monitor")
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("Monitor check failed")
-            backoff_seconds = min(max(backoff_seconds * 2, 30), 300)
+            backoff_seconds = _backoff_seconds(config, backoff_seconds, exc)
             sleep_seconds = backoff_seconds
 
         logger.info("Sleeping for %s seconds", sleep_seconds)
         time_module.sleep(sleep_seconds)
-

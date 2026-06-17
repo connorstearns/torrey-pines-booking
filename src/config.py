@@ -41,6 +41,13 @@ def _get_csv(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _get_int_csv(name: str, default: str = "") -> set[int]:
+    values: set[int] = set()
+    for item in _get_csv(name, default):
+        values.add(int(item))
+    return values
+
+
 def _get_target_dates(max_days_ahead: int, timezone: ZoneInfo) -> list[date]:
     configured = _get_csv("TARGET_DATES")
     if configured:
@@ -56,6 +63,7 @@ class WatchConfig:
     alert_channel: str
     timezone: ZoneInfo
     watch_courses: set[str]
+    watch_holes: set[int]
     target_dates: list[date]
     earliest_time: time
     latest_time: time
@@ -71,6 +79,11 @@ class WatchConfig:
     release_window_start: time
     release_window_end: time
     log_level: str
+    foreup_base_url: str
+    foreup_timeout_seconds: int
+    foreup_use_auth: bool
+    foreup_bearer_token: str | None
+    foreup_cookie: str | None
 
 
 def load_config() -> WatchConfig:
@@ -93,6 +106,7 @@ def load_config() -> WatchConfig:
         alert_channel=os.getenv("ALERT_CHANNEL", "slack").strip().lower(),
         timezone=timezone,
         watch_courses={course.lower() for course in _get_csv("WATCH_COURSES", "North,South")},
+        watch_holes=_get_int_csv("WATCH_HOLES", "9,18"),
         target_dates=_get_target_dates(max_days_ahead, timezone),
         earliest_time=_get_time("EARLIEST_TIME", "06:00"),
         latest_time=_get_time("LATEST_TIME", "11:00"),
@@ -108,5 +122,9 @@ def load_config() -> WatchConfig:
         release_window_start=_get_time("RELEASE_WINDOW_START", "18:58"),
         release_window_end=_get_time("RELEASE_WINDOW_END", "19:05"),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        foreup_base_url=os.getenv("FOREUP_BASE_URL", "https://foreupsoftware.com").rstrip("/"),
+        foreup_timeout_seconds=_get_int("FOREUP_TIMEOUT_SECONDS", 10),
+        foreup_use_auth=_get_bool("FOREUP_USE_AUTH", False),
+        foreup_bearer_token=os.getenv("FOREUP_BEARER_TOKEN") or None,
+        foreup_cookie=os.getenv("FOREUP_COOKIE") or None,
     )
-

@@ -11,9 +11,12 @@ class TeeTime:
     time: time
     course: str
     players_available: int
+    holes: int | None = None
+    side: str | None = None
     price: str | float | int | None = None
     booking_url: str | None = None
     source_id: str | None = None
+    metadata: dict[str, Any] | None = None
 
     @property
     def date_iso(self) -> str:
@@ -42,8 +45,10 @@ class TeeTime:
             "time": self.time_hhmm,
             "course": self.course,
             "players_available": self.players_available,
+            "holes": self.holes,
+            "side": self.side,
             "price": self.price,
             "booking_url": self.booking_url,
             "source_id": self.source_id,
+            "metadata": self.metadata or {},
         }
-

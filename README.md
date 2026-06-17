@@ -12,7 +12,7 @@ This project checks configured dates, courses, time windows, and player counts, 
 - Stores seen tee times in SQLite so the same slot does not alert repeatedly.
 - Sends Slack webhook alerts.
 - Supports dry-run mode for local testing without sending alerts.
-- Provides a placeholder fetcher with mock data until you wire in a lawful read-only availability request.
+- Fetches read-only ForeUp booking time availability for Torrey Pines.
 
 ## What This Tool Does Not Do
 
@@ -23,8 +23,9 @@ This project checks configured dates, courses, time windows, and player counts, 
 - It does not bypass CAPTCHA or access controls.
 - It does not automate payment.
 - It does not perform credential stuffing.
+- It does not call `pending_reservation`, `refresh_pending_reservation`, `reservation`, `cart`, `checkout`, or `payment` endpoints.
 
-If you later add an authenticated method, keep it lawful, read-only, and explicitly limited to availability checks.
+If you later enable optional authenticated headers, keep them lawful, read-only, and explicitly limited to availability checks.
 
 ## Setup
 
@@ -46,12 +47,18 @@ Key `.env` values:
 ```dotenv
 SLACK_WEBHOOK_URL=
 ALERT_CHANNEL=slack
+FOREUP_USE_AUTH=false
+FOREUP_BEARER_TOKEN=
+FOREUP_COOKIE=
+FOREUP_BASE_URL=https://foreupsoftware.com
+FOREUP_TIMEOUT_SECONDS=10
 TIMEZONE=America/Los_Angeles
 WATCH_COURSES=North,South
 TARGET_DATES=
 EARLIEST_TIME=06:00
-LATEST_TIME=11:00
+LATEST_TIME=12:00
 MIN_PLAYERS=1
+WATCH_HOLES=9,18
 MAX_DAYS_AHEAD=7
 DRY_RUN=true
 DATABASE_PATH=torrey_tee_times.db
@@ -64,12 +71,57 @@ BOOKING_URL=https://www.sandiego.gov/torrey-pines
 TARGET_DATES=2026-06-20,2026-06-21
 ```
 
+## ForeUp Availability Fetcher
+
+The default fetcher uses this read-only availability endpoint:
+
+```text
+GET https://foreupsoftware.com/index.php/api/booking/times
+```
+
+Known Torrey Pines resident 0-7 day profiles:
+
+| Course | course_id | schedule_id / teesheet_id | booking_class |
+| --- | ---: | ---: | ---: |
+| North | 19347 | 1468 | 1135 |
+| South | 19347 | 1487 | 888 |
+
+The fetcher sends one availability request per configured course profile per target date. It normalizes returned ForeUp items into `TeeTime` records using:
+
+- `time` parsed from `YYYY-MM-DD HH:MM`
+- `available_spots` as `players_available`
+- `green_fee` as `price`, with 9-hole or 18-hole green fee fallback
+- `teesheet_side_name` as side metadata
+- a stable `source_id` from schedule, booking class, start time, and holes
+
+Booking links are manual-only and use:
+
+```text
+https://foreupsoftware.com/index.php/booking/19347/{schedule_id}
+```
+
+The app has a request URL blocklist and refuses to call endpoints containing `pending_reservation`, `refresh_pending_reservation`, `reservation`, `cart`, `checkout`, or `payment`.
+
+### Auth And Session Warning
+
+By default, no auth headers, cookies, bearer tokens, or session values are sent:
+
+```dotenv
+FOREUP_USE_AUTH=false
+```
+
+If you set `FOREUP_USE_AUTH=true`, optional `FOREUP_BEARER_TOKEN` and `FOREUP_COOKIE` values are loaded only from environment variables. Do not commit `.env`, cookies, `PHPSESSID`, JWTs, bearer tokens, or personal data. Authenticated/session-based requests may carry account and policy risk; use them only for lawful read-only availability checks.
+
+The unauthenticated local dry run may return `401 Unauthorized`. That means the read-only endpoint was reached, but ForeUp wants an authorized browser/session context. If you choose to use local authenticated requests, keep those values only in `.env`. Do not paste cookies or tokens into Codex prompts, chat messages, source code, README examples, commits, logs, screenshots, or issue text.
+
+Session values may expire and need to be refreshed manually from your own browser session. Google Cloud deployment is not recommended yet because these values are browser/session-bound and should not be moved into cloud infrastructure until the local path is proven stable and you have a safer auth story.
+
 ## Slack Alerts
 
 Create a Slack incoming webhook, then set:
 
 ```dotenv
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+SLACK_WEBHOOK_URL=<your Slack incoming webhook URL>
 ALERT_CHANNEL=slack
 ```
 
@@ -87,11 +139,36 @@ Book manually: https://www.sandiego.gov/torrey-pines
 
 ## Run Locally
 
+Recommended local setup order:
+
+1. Create a personal Slack workspace, channel, and incoming webhook.
+2. Put `SLACK_WEBHOOK_URL` in `.env`.
+3. Run `python -m src.main test-alert`.
+4. Add ForeUp auth values locally in `.env` only if needed.
+5. Run `python -m src.main auth-check`.
+6. Run `python -m src.main check-once --dry-run`.
+7. Run `python -m src.main run --dry-run`.
+8. Only after everything works, set `DRY_RUN=false` and run `python -m src.main run`.
+
+Send one Slack test message:
+
+```powershell
+python -m src.main test-alert
+```
+
+Check ForeUp local auth/session status without sending alerts or marking slots seen:
+
+```powershell
+python -m src.main auth-check
+```
+
 Dry-run once:
 
 ```powershell
 python -m src.main check-once --dry-run
 ```
+
+If ForeUp returns `401 Unauthorized`, the endpoint is reachable but requires a valid read-only browser session or other authorized context. Only add session values through `.env`, never in source code, and do not enable auth for anything beyond availability reads.
 
 Send real alerts once after setting `DRY_RUN=false` in `.env`:
 
@@ -129,25 +206,32 @@ RELEASE_WINDOW_START=18:58
 RELEASE_WINDOW_END=19:05
 ```
 
-Keep request volume low. Use the release cadence only during a narrow expected release window, and prefer the normal cancellation cadence for all other monitoring.
+Keep request volume low. Use the release cadence only during a narrow expected release window, and prefer the normal cancellation cadence for all other monitoring. Do not reduce polling intervals unless you are certain the request volume remains respectful.
 
-## Replacing the Placeholder Fetcher
+The run loop is sequential and does not create parallel ForeUp request bursts. It backs off on network errors, `401`, `403`, `429`, and server errors, and slows the next poll after a new match is found.
 
-For now, `src/fetchers/manual_placeholder.py` returns mock tee times and includes:
+## Windows Task Scheduler
 
-```python
-fetch_from_official_availability_request()
+For local-only operation, run commands from your project directory with your virtual environment activated or use the virtual environment Python path directly. Create the `logs` folder first so output has somewhere local to go.
+
+Normal monitoring example:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "cd C:\Users\conno\Documents\torrey-pines-booking; .\.venv\Scripts\python.exe -m src.main run *> .\logs\normal-watch.log"
 ```
 
-Later, you can replace the placeholder by copying the read-only availability request you observe in Chrome DevTools and translating it into Python. Only use availability endpoints. Do not automate login, booking, reservation holds, CAPTCHA, form submission, or payment.
+Release-window watch example:
 
-Recommended approach:
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "cd C:\Users\conno\Documents\torrey-pines-booking; .\.venv\Scripts\python.exe -m src.main run *> .\logs\release-watch.log"
+```
 
-1. Open the official booking site manually in Chrome.
-2. Use DevTools Network to identify a read-only availability request.
-3. Translate only that request into `fetch_from_official_availability_request()`.
-4. Normalize the response into `TeeTime` objects.
-5. Keep polling intervals conservative.
+Suggested schedule:
+
+- Normal watch: start at login or during the day, using the default 5-15 minute interval.
+- Release watch: run only around the expected 6:58-7:05 PM Pacific window.
+
+Logs should not print Slack webhook URLs, cookies, bearer tokens, or personal session values. Keep `.env` local and uncommitted.
 
 ## Tests
 

@@ -4,11 +4,14 @@ import argparse
 import logging
 import sys
 
+import requests
+
 from .alerts.base import AlertChannel
 from .alerts.slack import SlackWebhookAlert
 from .config import WatchConfig, load_config
 from .db import SeenTeeTimeStore
-from .fetchers.manual_placeholder import ManualPlaceholderFetcher
+from .diagnostics import print_auth_check, send_test_alert
+from .fetchers.foreup_booking_times import ForeUpBookingTimesFetcher
 from .scheduler import check_once, run_forever
 
 
@@ -39,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser("check-once", help="Check once and exit")
     check_parser.add_argument("--dry-run", action="store_true", help="Print matches without alerts")
 
+    subparsers.add_parser(
+        "auth-check",
+        help="Check local ForeUp auth/session config against the read-only availability endpoint",
+    )
+    subparsers.add_parser("test-alert", help="Send one Slack webhook test message")
+
     return parser
 
 
@@ -47,12 +56,20 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config()
     configure_logging(config.log_level)
 
-    dry_run = bool(args.dry_run or config.dry_run)
-    fetcher = ManualPlaceholderFetcher(config.booking_url)
-    store = SeenTeeTimeStore(config.database_path)
-    alert_channel = build_alert_channel(config, dry_run)
+    dry_run = bool(getattr(args, "dry_run", False) or config.dry_run)
 
     try:
+        if args.command == "auth-check":
+            print_auth_check(config, sys.stdout)
+            return 0
+        if args.command == "test-alert":
+            send_test_alert(config.slack_webhook_url, sys.stdout)
+            return 0
+
+        fetcher = ForeUpBookingTimesFetcher.from_config(config)
+        store = SeenTeeTimeStore(config.database_path)
+        alert_channel = build_alert_channel(config, dry_run)
+
         if args.command == "check-once":
             check_once(config, fetcher, store, alert_channel, dry_run)
             return 0
@@ -61,10 +78,25 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     except KeyboardInterrupt:
         return 130
+    except requests.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else "unknown"
+        print(
+            f"ForeUp availability request failed with HTTP {status_code}. "
+            "Run `python -m src.main auth-check` for local auth/session guidance. "
+            "No alerts were sent and no slots were marked seen.",
+            file=sys.stderr,
+        )
+        return 1
+    except requests.RequestException as exc:
+        print(
+            f"ForeUp availability request failed: {type(exc).__name__}. "
+            "No alerts were sent and no slots were marked seen.",
+            file=sys.stderr,
+        )
+        return 1
 
     return 2
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

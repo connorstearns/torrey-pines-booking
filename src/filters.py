@@ -16,9 +16,9 @@ def matches_watch_config(tee_time: TeeTime, config: WatchConfig) -> bool:
         and today <= tee_time.date <= latest_allowed_date
         and config.earliest_time <= tee_time.time <= config.latest_time
         and tee_time.players_available >= config.min_players
+        and (tee_time.holes is None or tee_time.holes in config.watch_holes)
     )
 
 
 def filter_tee_times(tee_times: list[TeeTime], config: WatchConfig) -> list[TeeTime]:
     return [tee_time for tee_time in tee_times if matches_watch_config(tee_time, config)]
-
