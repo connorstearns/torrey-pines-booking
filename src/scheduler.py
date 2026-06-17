@@ -13,6 +13,7 @@ from .db import SeenTeeTimeStore
 from .fetchers.base import TeeTimeFetcher
 from .filters import filter_tee_times
 from .models import TeeTime
+from .session_health import SESSION_EXPIRED_MESSAGE, send_session_alert_once
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,18 @@ def run_forever(
             raise
         except Exception as exc:
             logger.exception("Monitor check failed")
+            if (
+                not dry_run
+                and isinstance(exc, requests.HTTPError)
+                and exc.response is not None
+                and exc.response.status_code in {401, 403}
+            ):
+                send_session_alert_once(
+                    config,
+                    store,
+                    "foreup_auth_expired",
+                    SESSION_EXPIRED_MESSAGE,
+                )
             backoff_seconds = _backoff_seconds(config, backoff_seconds, exc)
             sleep_seconds = backoff_seconds
 

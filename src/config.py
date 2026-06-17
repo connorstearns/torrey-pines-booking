@@ -59,6 +59,7 @@ def _get_target_dates(max_days_ahead: int, timezone: ZoneInfo) -> list[date]:
 
 @dataclass(frozen=True, slots=True)
 class WatchConfig:
+    state_backend: str
     slack_webhook_url: str | None
     alert_channel: str
     timezone: ZoneInfo
@@ -84,6 +85,8 @@ class WatchConfig:
     foreup_use_auth: bool
     foreup_bearer_token: str | None
     foreup_cookie: str | None
+    session_alert_cooldown_hours: int
+    token_expiry_warning_hours: int
 
 
 def load_config() -> WatchConfig:
@@ -102,6 +105,7 @@ def load_config() -> WatchConfig:
         raise ValueError("RELEASE_POLL_MIN_SECONDS must be <= RELEASE_POLL_MAX_SECONDS")
 
     return WatchConfig(
+        state_backend=os.getenv("STATE_BACKEND", "sqlite").strip().lower(),
         slack_webhook_url=os.getenv("SLACK_WEBHOOK_URL") or None,
         alert_channel=os.getenv("ALERT_CHANNEL", "slack").strip().lower(),
         timezone=timezone,
@@ -127,4 +131,6 @@ def load_config() -> WatchConfig:
         foreup_use_auth=_get_bool("FOREUP_USE_AUTH", False),
         foreup_bearer_token=os.getenv("FOREUP_BEARER_TOKEN") or None,
         foreup_cookie=os.getenv("FOREUP_COOKIE") or None,
+        session_alert_cooldown_hours=_get_int("SESSION_ALERT_COOLDOWN_HOURS", 6),
+        token_expiry_warning_hours=_get_int("TOKEN_EXPIRY_WARNING_HOURS", 24),
     )

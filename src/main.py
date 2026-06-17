@@ -9,10 +9,11 @@ import requests
 from .alerts.base import AlertChannel
 from .alerts.slack import SlackWebhookAlert
 from .config import WatchConfig, load_config
-from .db import SeenTeeTimeStore
+from .db import build_state_store
 from .diagnostics import print_auth_check, send_test_alert
 from .fetchers.foreup_booking_times import ForeUpBookingTimesFetcher
 from .scheduler import check_once, run_forever
+from .session_health import session_watch_once
 
 
 def configure_logging(level: str) -> None:
@@ -47,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check local ForeUp auth/session config against the read-only availability endpoint",
     )
     subparsers.add_parser("test-alert", help="Send one Slack webhook test message")
+    subparsers.add_parser(
+        "session-watch",
+        help="Run one read-only ForeUp session health check and alert on expiry",
+    )
 
     return parser
 
@@ -65,9 +70,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "test-alert":
             send_test_alert(config.slack_webhook_url, sys.stdout)
             return 0
+        if args.command == "session-watch":
+            store = build_state_store(config)
+            results = session_watch_once(config, store)
+            for result in results:
+                print(result)
+            return 0
 
         fetcher = ForeUpBookingTimesFetcher.from_config(config)
-        store = SeenTeeTimeStore(config.database_path)
+        store = build_state_store(config)
         alert_channel = build_alert_channel(config, dry_run)
 
         if args.command == "check-once":

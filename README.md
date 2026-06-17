@@ -47,11 +47,14 @@ Key `.env` values:
 ```dotenv
 SLACK_WEBHOOK_URL=
 ALERT_CHANNEL=slack
+STATE_BACKEND=sqlite
 FOREUP_USE_AUTH=false
 FOREUP_BEARER_TOKEN=
 FOREUP_COOKIE=
 FOREUP_BASE_URL=https://foreupsoftware.com
 FOREUP_TIMEOUT_SECONDS=10
+SESSION_ALERT_COOLDOWN_HOURS=6
+TOKEN_EXPIRY_WARNING_HOURS=24
 TIMEZONE=America/Los_Angeles
 WATCH_COURSES=North,South
 TARGET_DATES=
@@ -162,6 +165,20 @@ Check ForeUp local auth/session status without sending alerts or marking slots s
 python -m src.main auth-check
 ```
 
+Check the local ForeUp session and send Slack only if the session is invalid or the bearer token expires soon:
+
+```powershell
+python -m src.main session-watch
+```
+
+`session-watch` uses only the read-only ForeUp availability endpoint. If ForeUp returns `401` or `403`, it sends this Slack message at most once per cooldown window:
+
+```text
+ForeUp session expired. Refresh FOREUP_BEARER_TOKEN and FOREUP_COOKIE in local .env, then run python -m src.main auth-check.
+```
+
+The default cooldown is 6 hours. `auth-check` also decodes the local bearer token payload without verifying or printing the token and reports only expiration time, time remaining, and whether it expires soon. If token expiration is within 24 hours, it warns that the bearer token expires soon.
+
 Dry-run once:
 
 ```powershell
@@ -232,6 +249,36 @@ Suggested schedule:
 - Release watch: run only around the expected 6:58-7:05 PM Pacific window.
 
 Logs should not print Slack webhook URLs, cookies, bearer tokens, or personal session values. Keep `.env` local and uncommitted.
+
+## Google Cloud Run Jobs
+
+Local runs use SQLite by default:
+
+```dotenv
+STATE_BACKEND=sqlite
+```
+
+Cloud Run Jobs use ephemeral containers, so SQLite files may disappear between scheduled executions. For Cloud Run Jobs, use Firestore for persistent seen-slot dedupe and session-alert cooldown state:
+
+```dotenv
+STATE_BACKEND=firestore
+```
+
+The Firestore backend uses:
+
+- `torrey_seen_slots` for tee-time dedupe documents.
+- `torrey_session_alerts` for session warning cooldown documents.
+
+Seen-slot documents store only alert state such as `source_id`, `course`, `date`, `time`, `holes`, `players_available`, `first_seen_at`, and `alerted_at`. Session-alert documents store only alert keys and timestamps. Do not store Slack webhook URLs, ForeUp bearer tokens, ForeUp cookies, browser session values, or personal account data in Firestore.
+
+Cloud setup outline:
+
+1. Enable Firestore in the Google Cloud project.
+2. Deploy the container with dependencies from `requirements.txt`.
+3. Run the Cloud Run Job service account with Firestore read/write access for the two collections above.
+4. Set `STATE_BACKEND=firestore` in the Cloud Run Job environment.
+5. Store Slack and ForeUp secrets only in a proper secret manager or local `.env` for local runs, never in source code or Firestore.
+6. Keep the same conservative schedule and read-only endpoint restrictions used locally.
 
 ## Tests
 

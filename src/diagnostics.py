@@ -9,6 +9,7 @@ import requests
 
 from .config import WatchConfig
 from .fetchers.foreup_booking_times import ForeUpBookingTimesFetcher
+from .session_health import decode_jwt_expiration
 
 TEST_ALERT_TEXT = (
     "Test alert from Torrey Pines tee-time monitor. If you see this on your phone, "
@@ -97,12 +98,28 @@ def _auth_next_step(status_code: int, parsed_json: bool, slots_returned: int) ->
 
 
 def _print_auth_summary(config: WatchConfig, result: AuthCheckResult, stream: TextIO) -> None:
+    token_status = decode_jwt_expiration(
+        config.foreup_bearer_token,
+        config.token_expiry_warning_hours,
+    )
     print("ForeUp auth check:", file=stream)
     print(f"FOREUP_USE_AUTH={config.foreup_use_auth}", file=stream)
     print(f"FOREUP_BEARER_TOKEN present={bool(config.foreup_bearer_token)}", file=stream)
     print(f"FOREUP_COOKIE present={bool(config.foreup_cookie)}", file=stream)
     print(f"SLACK_WEBHOOK_URL present={bool(config.slack_webhook_url)}", file=stream)
     print(f"endpoint status code={result.status_code}", file=stream)
+    if config.foreup_bearer_token:
+        if token_status.expires_at:
+            print(f"token expiration datetime={token_status.expires_at.isoformat()}", file=stream)
+            print(f"token time remaining={token_status.human_remaining}", file=stream)
+            print(f"token expired={token_status.is_expired}", file=stream)
+            print(f"token nearing expiration={token_status.expires_soon}", file=stream)
+            if token_status.expires_soon:
+                print("token warning=Bearer token expires soon.", file=stream)
+        elif token_status.is_malformed:
+            print("token expiration status=malformed or unreadable", file=stream)
+        else:
+            print("token expiration status=no exp claim found", file=stream)
     print(f"response parses as JSON={result.parsed_json}", file=stream)
     print(f"slots returned={result.slots_returned}", file=stream)
     if result.first_slot_preview:

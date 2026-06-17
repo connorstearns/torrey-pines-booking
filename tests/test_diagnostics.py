@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import replace
-from datetime import date, time
+from datetime import date, datetime, time, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -16,6 +18,17 @@ from src.fetchers.foreup_booking_times import ForeUpBookingTimesFetcher
 SENSITIVE_TOKEN = "secret-token-value"
 SENSITIVE_COOKIE = "session-cookie-value"
 SENSITIVE_WEBHOOK = "https://example.com/slack-webhook"
+
+
+def _jwt(exp: int) -> str:
+    header = _b64({"alg": "none", "typ": "JWT"})
+    payload = _b64({"exp": exp})
+    return f"{header}.{payload}."
+
+
+def _b64(payload: dict) -> str:
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+    return encoded.rstrip("=")
 
 
 class FakeResponse:
@@ -45,6 +58,7 @@ class FakeSession:
 
 def _config() -> WatchConfig:
     return WatchConfig(
+        state_backend="sqlite",
         slack_webhook_url=SENSITIVE_WEBHOOK,
         alert_channel="slack",
         timezone=ZoneInfo("America/Los_Angeles"),
@@ -70,6 +84,8 @@ def _config() -> WatchConfig:
         foreup_use_auth=True,
         foreup_bearer_token=SENSITIVE_TOKEN,
         foreup_cookie=SENSITIVE_COOKIE,
+        session_alert_cooldown_hours=6,
+        token_expiry_warning_hours=24,
     )
 
 
@@ -138,6 +154,18 @@ def test_auth_check_redacts_token_cookie_and_webhook() -> None:
     assert "SLACK_WEBHOOK_URL present=True" in output
 
 
+def test_auth_check_warns_when_bearer_token_expires_soon() -> None:
+    token = _jwt(int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()))
+    config = replace(_config(), foreup_bearer_token=token)
+    stream = StringIO()
+
+    print_auth_check(config, stream, _fetcher(FakeResponse(200, [])))
+
+    output = stream.getvalue()
+    assert "token warning=Bearer token expires soon." in output
+    assert token not in output
+
+
 def test_test_alert_sends_exactly_one_slack_payload() -> None:
     calls = []
 
@@ -166,4 +194,3 @@ def test_test_alert_missing_webhook_does_not_call_post() -> None:
 
     assert not send_test_alert(None, stream, post=fake_post)
     assert "SLACK_WEBHOOK_URL is missing" in stream.getvalue()
-

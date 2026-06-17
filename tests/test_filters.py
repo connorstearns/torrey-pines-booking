@@ -12,6 +12,7 @@ from src.models import TeeTime
 
 def _config(target_date: date) -> WatchConfig:
     return WatchConfig(
+        state_backend="sqlite",
         slack_webhook_url=None,
         alert_channel="slack",
         timezone=ZoneInfo("America/Los_Angeles"),
@@ -37,6 +38,8 @@ def _config(target_date: date) -> WatchConfig:
         foreup_use_auth=False,
         foreup_bearer_token=None,
         foreup_cookie=None,
+        session_alert_cooldown_hours=6,
+        token_expiry_warning_hours=24,
     )
 
 
